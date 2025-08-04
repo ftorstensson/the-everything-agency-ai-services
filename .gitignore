@@ -1,4 +1,14 @@
-test/
+# Dependencies
 node_modules/
+
+# Environment Variables
+.env
+
+# Genkit-specific
 .genkit/
+
+# Compiled JavaScript files
 *.js
+
+# Test directories
+test/
