@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "npx tsc",
+    "start": "npx tsc && node index.js",
     "genkit:dev": "dotenv -- npx genkit start -- npx tsx --watch index.ts"
   },
   "keywords": [],
