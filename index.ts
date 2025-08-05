@@ -5,8 +5,9 @@ import { startFlowServer } from '@genkit-ai/express';
 
 // Configure Genkit to use the Vertex AI plugin.
 // This plugin will automatically use the application's default credentials in Cloud Run.
+// EXPLICITLY set the location to match the Cloud Run deployment region.
 const genkitApp = genkit({
-  plugins: [vertexAI()],
+  plugins: [vertexAI({ location: 'australia-southeast1' })],
 });
 
 const characterGeneratorFlow = genkitApp.defineFlow(
@@ -29,7 +30,7 @@ const characterGeneratorFlow = genkitApp.defineFlow(
         temperature: 0.1,
       },
     });
-    
+
     try {
       return JSON.parse(response.text);
     } catch (parseError) {
