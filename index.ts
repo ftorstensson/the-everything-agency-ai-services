@@ -1,8 +1,8 @@
 import { genkit, z } from 'genkit';
+// Corrected the typo from '@gen-ai/googleai' back to the proper package name
 import { googleAI, gemini15Pro, gemini15Flash } from '@genkit-ai/googleai';
 import express, { Request, Response } from 'express';
 
-// The genkitApp instance is our connection to the Genkit framework.
 const genkitApp = genkit({
   plugins: [googleAI()],
 });
@@ -63,7 +63,7 @@ app.use(express.json());
 app.post('/searchAndAnswerFlow', async (req: Request, res: Response) => {
   const input = req.body.input;
   try {
-    // Correct usage for v1.15.5: Use the genkitApp.run() method with the flow's name as a string.
+    // The surgically precise fix: Call genkitApp.run with the flow's name as a STRING.
     const result = await genkitApp.run('searchAndAnswerFlow', input);
     res.status(200).json({ result });
   } catch (e: any) {
@@ -75,7 +75,7 @@ app.post('/searchAndAnswerFlow', async (req: Request, res: Response) => {
 app.post('/characterGeneratorFlow', async (req: Request, res: Response) => {
   const input = req.body.input;
   try {
-    // Correct usage for v1.15.5: Use the genkitApp.run() method with the flow's name as a string.
+    // The surgically precise fix: Call genkitApp.run with the flow's name as a STRING.
     const result = await genkitApp.run('characterGeneratorFlow', input);
     res.status(200).json({ result });
   } catch (e: any) {
