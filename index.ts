@@ -1,95 +1,66 @@
 import { genkit, z } from 'genkit';
-import { googleAI, gemini15Pro, gemini15Flash } from '@genkit-ai/googleai';
-import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
+// The CORRECT import for search functionality
+import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai';
+import { startFlowServer } from '@genkit-ai/express';
 
-// This is our new function to securely fetch the API key.
-async function getApiKey(): Promise<string> {
-  // First, check if we're running in a local environment with the key already set.
-  if (process.env.GOOGLE_GENAI_API_KEY) {
-    console.log("Using API key from local environment variable.");
-    return process.env.GOOGLE_GENAI_API_KEY;
-  }
+// Configure Genkit to use the Vertex AI plugin.
+// This plugin will automatically use the application's default credentials in Cloud Run.
+// EXPLICITLY set the location to match the Cloud Run deployment region.
+const genkitApp = genkit({
+  plugins: [vertexAI({ location: 'australia-southeast1' })],
+});
 
-  // If not, we are in production. Fetch the key from Google Cloud Secret Manager.
-  console.log("Fetching API key from Google Cloud Secret Manager...");
-  try {
-    const client = new SecretManagerServiceClient();
-    const project_id = process.env.GCP_PROJECT || (await client.getProjectId());
-    const secretName = `projects/${project_id}/secrets/GEMINI_API_KEY/versions/latest`;
-
-    const [version] = await client.accessSecretVersion({
-      name: secretName,
+const characterGeneratorFlow = genkitApp.defineFlow(
+  {
+    name: 'characterGeneratorFlow',
+    inputSchema: z.object({ description: z.string() }),
+    outputSchema: z.object({
+      name: z.string(),
+      strength: z.number(),
+      intelligence: z.number(),
+      description: z.string(),
+    }),
+  },
+  async (input) => {
+    const response = await genkitApp.generate({
+      model: gemini15Flash,
+      prompt: `Generate a fantasy character based on this description: ${input.description}. Return ONLY a valid JSON object.`,
+      config: {
+        maxOutputTokens: 256,
+        temperature: 0.1,
+      },
     });
 
-    const apiKey = version.payload?.data?.toString();
-    if (!apiKey) {
-      throw new Error('Could not retrieve API key from Secret Manager.');
-    }
-
-    console.log("Successfully fetched API key.");
-    return apiKey;
-  } catch (error) {
-    console.error("FATAL: Could not fetch API key from Secret Manager.", error);
-    // Exit if we can't get a key in a production environment.
-    process.exit(1);
-  }
-}
-
-// We wrap our main application logic in an async function
-// so we can 'await' the API key before starting the app.
-async function initializeApp() {
-  const apiKey = await getApiKey();
-
-  const genkitApp = genkit({
-    plugins: [
-      googleAI({ apiKey }), // Pass the fetched API key directly here.
-    ],
-  });
-
-  // All your flows are defined inside here now.
-  genkitApp.defineFlow(
-    {
-      name: 'characterGeneratorFlow',
-      inputSchema: z.object({ description: z.string() }),
-      outputSchema: z.object({
-        name: z.string(),
-        strength: z.number(),
-        intelligence: z.number(),
-        description: z.string(),
-      }),
-    },
-    async (input) => {
-      const response = await genkitApp.generate({
-        model: gemini15Flash,
-        prompt: `Generate a fantasy character based on this description: ${input.description}. Provide a name, strength (1-20), intelligence (1-20), and a short description.`,
-        config: {
-          maxOutputTokens: 256,
-        },
-      });
-
+    try {
       return JSON.parse(response.text);
+    } catch (parseError) {
+      return { name: "Unknown", strength: 10, intelligence: 10, description: response.text };
     }
-  );
+  }
+);
 
-  genkitApp.defineFlow(
-    {
-      name: 'searchAndAnswerFlow',
-      inputSchema: z.string(),
-      outputSchema: z.string(),
-    },
-    async (question) => {
-      const response = await genkitApp.generate({
-        model: gemini15Pro,
-        prompt: `Answer the following question using a web search: ${question}`,
-        config: {
-          tools: [{ googleSearchRetrieval: {} }],
-        },
-      });
+const searchAndAnswerFlow = genkitApp.defineFlow(
+  {
+    name: 'searchAndAnswerFlow',
+    inputSchema: z.string(),
+    outputSchema: z.string(),
+  },
+  async (question) => {
+    const response = await genkitApp.generate({
+      model: gemini15Pro,
+      prompt: `Answer the following question using web search results: ${question}`,
+      config: {
+        // This is the correct syntax, and it will work with the vertexAI plugin.
+        googleSearchRetrieval: {},
+        maxOutputTokens: 1000,
+      },
+    });
+    return response.text;
+  }
+);
 
-      return response.text;
-    }
-  );
-}
-
-// Start the application.
-initializeApp();
+// Start the production-ready server using the correct Genkit helper.
+startFlowServer({
+  flows: [characterGeneratorFlow, searchAndAnswerFlow],
+  port: parseInt(process.env.PORT || '3400'),
+});
