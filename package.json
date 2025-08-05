@@ -18,6 +18,7 @@
     "typescript": "^5.6.3"
   },
   "dependencies": {
+    "@genkit-ai/express": "^1.15.5",
     "@genkit-ai/googleai": "^1.15.5",
     "@google-cloud/secret-manager": "^5.5.0",
     "express": "^4.19.2",
