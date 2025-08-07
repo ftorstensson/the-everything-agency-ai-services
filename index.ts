@@ -1,10 +1,9 @@
 import { genkit, z } from 'genkit';
-import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai';
+import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai'; // Corrected gemini15Flash
 import { startFlowServer } from '@genkit-ai/express';
-import { openAI, gpt4o } from 'genkitx-openai'; // Import OpenAI plugin and model
-import { SecretManagerServiceClient } from '@google-cloud/secret-manager'; // Import Secret Manager client
+import { openAI, gpt4o } from 'genkitx-openai';
+import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 
-// Instantiate the Secret Manager client
 const secretManager = new SecretManagerServiceClient();
 
 async function getOpenAIKey(): Promise<string> {
@@ -19,49 +18,21 @@ async function getOpenAIKey(): Promise<string> {
     return apiKey;
   } catch (error) {
     console.error('Failed to load OpenAI API key from Secret Manager:', error);
-    process.exit(1); // Exit if the key cannot be loaded
+    process.exit(1);
   }
 }
 
-// Create a main startup function to handle async initialization
 async function startServer() {
   const openaiApiKey = await getOpenAIKey();
 
   const genkitApp = genkit({
     plugins: [
       vertexAI({ location: 'australia-southeast1' }),
-      openAI({ apiKey: openaiApiKey }), // Add the initialized OpenAI plugin
+      openAI({ apiKey: openaiApiKey }),
     ],
   });
 
-  const characterGeneratorFlow = genkitApp.defineFlow(
-    {
-      name: 'characterGeneratorFlow',
-      inputSchema: z.object({ description: z.string() }),
-      outputSchema: z.object({
-        name: z.string(),
-        strength: z.number(),
-        intelligence: z.number(),
-        description: z.string(),
-      }),
-    },
-    async (input) => {
-      const response = await genkitApp.generate({
-        model: gemini15Flash,
-        prompt: `Generate a fantasy character based on this description: ${input.description}. Return ONLY a valid JSON object.`,
-        config: {
-          maxOutputTokens: 256,
-          temperature: 0.1,
-        },
-      });
-
-      try {
-        return JSON.parse(response.text);
-      } catch (parseError) {
-        return { name: "Unknown", strength: 10, intelligence: 10, description: response.text };
-      }
-    }
-  );
+  // --- Existing Flows ---
 
   const searchAndAnswerFlow = genkitApp.defineFlow(
     {
@@ -82,7 +53,6 @@ async function startServer() {
     }
   );
 
-  // NEW: A flow specifically to test the OpenAI integration
   const creativeTextFlow = genkitApp.defineFlow(
     {
       name: 'creativeTextFlow',
@@ -91,20 +61,69 @@ async function startServer() {
     },
     async (topic) => {
       const response = await genkitApp.generate({
-        model: gpt4o, // Use the imported OpenAI model
+        model: gpt4o,
         prompt: `Write a short, creative paragraph about: ${topic}`,
       });
       return response.text;
     }
   );
-  
-  // Start the production-ready server using the correct Genkit helper.
-  // Add the new flow to the list of exposed flows.
+
+  // --- NEW: ARCE Placeholder Flows ---
+
+  const architectFlow = genkitApp.defineFlow(
+    {
+      name: 'architectFlow',
+      inputSchema: z.string(), // Takes the user's task description
+      outputSchema: z.string(), // Returns a simple JSON string plan
+    },
+    async (taskDescription) => {
+      console.log(`ArchitectFlow received task: ${taskDescription}`);
+      const plan = {
+        title: "Plan for " + taskDescription,
+        steps: [
+          "Conduct initial research on the core topic.",
+          "Synthesize findings into a draft report.",
+          "Review and edit the draft for clarity and accuracy."
+        ]
+      };
+      return JSON.stringify(plan);
+    }
+  );
+
+  const creatorFlow = genkitApp.defineFlow(
+    {
+      name: 'creatorFlow',
+      inputSchema: z.string(), // Takes the plan and research data
+      outputSchema: z.string(), // Returns a simple draft
+    },
+    async (planAndResearch) => {
+      console.log(`CreatorFlow received plan and research.`);
+      return "This is the first draft of the report, based on the provided plan and research data.";
+    }
+  );
+
+  const editorFlow = genkitApp.defineFlow(
+    {
+      name: 'editorFlow',
+      inputSchema: z.string(), // Takes the draft
+      outputSchema: z.string(), // Returns the final polished report
+    },
+    async (draft) => {
+      console.log(`EditorFlow received draft: ${draft}`);
+      return "This is the final, edited, and polished report, ready for the user.";
+    }
+  );
+
   startFlowServer({
-    flows: [characterGeneratorFlow, searchAndAnswerFlow, creativeTextFlow],
+    flows: [
+      searchAndAnswerFlow,
+      creativeTextFlow,
+      architectFlow, // Expose the new flow
+      creatorFlow,   // Expose the new flow
+      editorFlow     // Expose the new flow
+    ],
     port: parseInt(process.env.PORT || '3400'),
   });
 }
 
-// Run the startup function
 startServer();
