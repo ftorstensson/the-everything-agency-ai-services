@@ -1,5 +1,5 @@
 // index.ts
-// v3.2 - DEFINITIVE FIX: Added response cleaning to handle markdown code fences.
+// v3.3 - UPGRADED: CreatorFlow is now an intelligent agent using a Firestore prompt.
 
 import { genkit, z } from 'genkit';
 import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai';
@@ -86,13 +86,12 @@ async function startServer() {
       let planJsonString = response.text;
       console.log(`ArchitectFlow generated raw response: ${planJsonString}`);
 
-      // DEFINITIVE FIX: Clean the response to remove markdown fences.
       if (planJsonString.startsWith("```json")) {
         planJsonString = planJsonString.slice(7, -3).trim();
       }
 
       try {
-        JSON.parse(planJsonString); // We still validate it
+        JSON.parse(planJsonString);
         console.log(`ArchitectFlow successfully cleaned and validated JSON.`);
         return planJsonString;
       } catch (e) {
@@ -121,15 +120,33 @@ async function startServer() {
     }
   );
   
+  // UPGRADED: This flow is now intelligent.
   const creatorFlow = genkitApp.defineFlow(
     {
       name: 'creatorFlow',
-      inputSchema: z.string(),
-      outputSchema: z.string(),
+      inputSchema: z.string(), // Takes the plan and research data as a single string
+      outputSchema: z.string(), // Returns the draft as a single string
     },
     async (planAndResearch) => {
-      console.log(`CreatorFlow received plan and research.`);
-      return "This is the first draft of the report, based on the provided plan and research data.";
+      console.log(`CreatorFlow received combined input.`);
+      
+      const creatorSystemPrompt = await getGenkitPromptFromFirestore('creator');
+
+      const response = await genkitApp.generate({
+        model: gemini15Pro,
+        messages: [
+          { role: 'system', content: [{ text: creatorSystemPrompt }] },
+          { role: 'user', content: [{ text: planAndResearch }] }
+        ],
+        config: {
+          temperature: 0.5, // Slightly more creative than the architect
+        }
+      });
+      
+      const draft = response.text;
+      console.log(`CreatorFlow successfully generated a draft.`);
+      
+      return draft;
     }
   );
 
