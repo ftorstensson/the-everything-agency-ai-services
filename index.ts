@@ -1,8 +1,7 @@
 // index.ts
-// v3.1 - DEFINITIVE FINAL FIX: Corrected response.text() to response.text.
+// v3.2 - DEFINITIVE FIX: Added response cleaning to handle markdown code fences.
 
 import { genkit, z } from 'genkit';
-// REMOVED: defineTool is no longer needed.
 import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai';
 import { startFlowServer } from '@genkit-ai/express';
 import { openAI, gpt4o } from 'genkitx-openai';
@@ -73,7 +72,6 @@ async function startServer() {
       
       const architectSystemPrompt = await getGenkitPromptFromFirestore('architect');
 
-      // DEFINITIVE FIX: Using the simple, robust prompt engineering approach.
       const response = await genkitApp.generate({
         model: gemini15Pro,
         messages: [
@@ -81,20 +79,24 @@ async function startServer() {
             { role: 'user', content: [{ text: taskDescription }] }
         ],
         config: {
-            temperature: 0.0, // Set to 0 for maximum consistency in JSON output
+            temperature: 0.0,
         }
       });
       
-      // DEFINITIVE FIX: response.text is a property, not a method.
-      const planJsonString = response.text;
+      let planJsonString = response.text;
       console.log(`ArchitectFlow generated raw response: ${planJsonString}`);
 
-      // Add a validation step to ensure the output is valid JSON
+      // DEFINITIVE FIX: Clean the response to remove markdown fences.
+      if (planJsonString.startsWith("```json")) {
+        planJsonString = planJsonString.slice(7, -3).trim();
+      }
+
       try {
-        JSON.parse(planJsonString);
+        JSON.parse(planJsonString); // We still validate it
+        console.log(`ArchitectFlow successfully cleaned and validated JSON.`);
         return planJsonString;
       } catch (e) {
-        console.error("Architect agent returned invalid JSON.", e);
+        console.error("Architect agent returned invalid JSON even after cleaning.", e);
         throw new Error("The Architect agent failed to generate a valid JSON plan. Please try again.");
       }
     }
@@ -115,7 +117,7 @@ async function startServer() {
           maxOutputTokens: 1000,
         },
       });
-      return response.text; // This was already correct
+      return response.text;
     }
   );
   
