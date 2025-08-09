@@ -1,16 +1,16 @@
 // index.ts
-// v2.0 - UPGRADED: ArchitectFlow is now an intelligent agent using a Firestore prompt.
+// v2.3 - DEFINITIVE FIX 3: Corrected 'messages' content to be a valid Part array.
 
 import { genkit, z } from 'genkit';
 import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai';
 import { startFlowServer } from '@genkit-ai/express';
 import { openAI, gpt4o } from 'genkitx-openai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
-import { Firestore } from '@google-cloud/firestore'; // Import Firestore
+import { Firestore } from '@google-cloud/firestore';
 
 // --- Initialization ---
 const secretManager = new SecretManagerServiceClient();
-const db = new Firestore(); // Initialize Firestore client
+const db = new Firestore();
 
 // --- Helper Functions ---
 
@@ -30,7 +30,6 @@ async function getOpenAIKey(): Promise<string> {
   }
 }
 
-// NEW: Function to fetch prompts for Genkit agents from Firestore
 async function getGenkitPromptFromFirestore(promptId: string): Promise<string> {
     try {
         const docRef = db.collection('genkit_prompts').doc(promptId);
@@ -45,7 +44,6 @@ async function getGenkitPromptFromFirestore(promptId: string): Promise<string> {
         throw new Error(`Prompt '${promptId}' not found or is empty.`);
     } catch (error) {
         console.error(`Failed to fetch Genkit prompt '${promptId}':`, error);
-        // Fallback to a safe default
         return "You are a helpful assistant. Your primary prompt failed to load.";
     }
 }
@@ -63,34 +61,45 @@ async function startServer() {
 
   // --- ARCE Agent Flows ---
 
-  // UPGRADED: This flow is now intelligent.
   const architectFlow = genkitApp.defineFlow(
     {
       name: 'architectFlow',
-      inputSchema: z.string(), // Takes the user's task description
-      outputSchema: z.string(), // Returns a JSON string plan
+      inputSchema: z.string(),
+      outputSchema: z.string(),
     },
     async (taskDescription) => {
       console.log(`ArchitectFlow received task: ${taskDescription}`);
       
-      // 1. Fetch the brain for the Architect agent
       const architectSystemPrompt = await getGenkitPromptFromFirestore('architect');
 
-      // 2. Call the LLM with the fetched prompt and the user's task
+      // DEFINITIVE FIX: The 'content' field must be an array of Parts, like [{ text: "..." }].
       const response = await genkitApp.generate({
         model: gemini15Pro,
-        prompt: taskDescription,
+        messages: [
+            { role: 'system', content: [{ text: architectSystemPrompt }] },
+            { role: 'user', content: [{ text: taskDescription }] }
+        ],
         config: {
-            systemPrompt: architectSystemPrompt,
-            responseFormat: 'json', // Enforce JSON output
+            tools: [{
+                type: 'output',
+                name: 'Plan',
+                schema: z.object({
+                    title: z.string(),
+                    steps: z.array(z.string())
+                })
+            }]
         }
       });
       
-      const planJson = response.text;
-      console.log(`ArchitectFlow generated plan: ${planJson}`);
+      const planObject = response.output?.json;
+      if (!planObject) {
+          throw new Error("Architect failed to generate a valid plan in JSON format.");
+      }
+      
+      const planJsonString = JSON.stringify(planObject);
+      console.log(`ArchitectFlow generated plan: ${planJsonString}`);
 
-      // 3. Return the generated plan
-      return planJson;
+      return planJsonString;
     }
   );
 
@@ -113,7 +122,6 @@ async function startServer() {
     }
   );
   
-  // NOTE: Creator and Editor are still placeholders for now.
   const creatorFlow = genkitApp.defineFlow(
     {
       name: 'creatorFlow',
