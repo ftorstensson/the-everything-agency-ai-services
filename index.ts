@@ -1,10 +1,18 @@
+// index.ts
+// v2.0 - UPGRADED: ArchitectFlow is now an intelligent agent using a Firestore prompt.
+
 import { genkit, z } from 'genkit';
-import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai'; // Corrected gemini15Flash
+import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai';
 import { startFlowServer } from '@genkit-ai/express';
 import { openAI, gpt4o } from 'genkitx-openai';
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
+import { Firestore } from '@google-cloud/firestore'; // Import Firestore
 
+// --- Initialization ---
 const secretManager = new SecretManagerServiceClient();
+const db = new Firestore(); // Initialize Firestore client
+
+// --- Helper Functions ---
 
 async function getOpenAIKey(): Promise<string> {
   const secretName = 'projects/vibe-agent-final/secrets/OPENAI_API_KEY/versions/latest';
@@ -22,6 +30,27 @@ async function getOpenAIKey(): Promise<string> {
   }
 }
 
+// NEW: Function to fetch prompts for Genkit agents from Firestore
+async function getGenkitPromptFromFirestore(promptId: string): Promise<string> {
+    try {
+        const docRef = db.collection('genkit_prompts').doc(promptId);
+        const doc = await docRef.get();
+        if (doc.exists) {
+            const promptText = doc.data()?.prompt_text;
+            if (promptText) {
+                console.log(`Successfully fetched prompt '${promptId}' from Firestore.`);
+                return promptText;
+            }
+        }
+        throw new Error(`Prompt '${promptId}' not found or is empty.`);
+    } catch (error) {
+        console.error(`Failed to fetch Genkit prompt '${promptId}':`, error);
+        // Fallback to a safe default
+        return "You are a helpful assistant. Your primary prompt failed to load.";
+    }
+}
+
+
 async function startServer() {
   const openaiApiKey = await getOpenAIKey();
 
@@ -32,7 +61,38 @@ async function startServer() {
     ],
   });
 
-  // --- Existing Flows ---
+  // --- ARCE Agent Flows ---
+
+  // UPGRADED: This flow is now intelligent.
+  const architectFlow = genkitApp.defineFlow(
+    {
+      name: 'architectFlow',
+      inputSchema: z.string(), // Takes the user's task description
+      outputSchema: z.string(), // Returns a JSON string plan
+    },
+    async (taskDescription) => {
+      console.log(`ArchitectFlow received task: ${taskDescription}`);
+      
+      // 1. Fetch the brain for the Architect agent
+      const architectSystemPrompt = await getGenkitPromptFromFirestore('architect');
+
+      // 2. Call the LLM with the fetched prompt and the user's task
+      const response = await genkitApp.generate({
+        model: gemini15Pro,
+        prompt: taskDescription,
+        config: {
+            systemPrompt: architectSystemPrompt,
+            responseFormat: 'json', // Enforce JSON output
+        }
+      });
+      
+      const planJson = response.text;
+      console.log(`ArchitectFlow generated plan: ${planJson}`);
+
+      // 3. Return the generated plan
+      return planJson;
+    }
+  );
 
   const searchAndAnswerFlow = genkitApp.defineFlow(
     {
@@ -52,49 +112,13 @@ async function startServer() {
       return response.text;
     }
   );
-
-  const creativeTextFlow = genkitApp.defineFlow(
-    {
-      name: 'creativeTextFlow',
-      inputSchema: z.string(),
-      outputSchema: z.string(),
-    },
-    async (topic) => {
-      const response = await genkitApp.generate({
-        model: gpt4o,
-        prompt: `Write a short, creative paragraph about: ${topic}`,
-      });
-      return response.text;
-    }
-  );
-
-  // --- NEW: ARCE Placeholder Flows ---
-
-  const architectFlow = genkitApp.defineFlow(
-    {
-      name: 'architectFlow',
-      inputSchema: z.string(), // Takes the user's task description
-      outputSchema: z.string(), // Returns a simple JSON string plan
-    },
-    async (taskDescription) => {
-      console.log(`ArchitectFlow received task: ${taskDescription}`);
-      const plan = {
-        title: "Plan for " + taskDescription,
-        steps: [
-          "Conduct initial research on the core topic.",
-          "Synthesize findings into a draft report.",
-          "Review and edit the draft for clarity and accuracy."
-        ]
-      };
-      return JSON.stringify(plan);
-    }
-  );
-
+  
+  // NOTE: Creator and Editor are still placeholders for now.
   const creatorFlow = genkitApp.defineFlow(
     {
       name: 'creatorFlow',
-      inputSchema: z.string(), // Takes the plan and research data
-      outputSchema: z.string(), // Returns a simple draft
+      inputSchema: z.string(),
+      outputSchema: z.string(),
     },
     async (planAndResearch) => {
       console.log(`CreatorFlow received plan and research.`);
@@ -105,8 +129,8 @@ async function startServer() {
   const editorFlow = genkitApp.defineFlow(
     {
       name: 'editorFlow',
-      inputSchema: z.string(), // Takes the draft
-      outputSchema: z.string(), // Returns the final polished report
+      inputSchema: z.string(),
+      outputSchema: z.string(),
     },
     async (draft) => {
       console.log(`EditorFlow received draft: ${draft}`);
@@ -116,11 +140,10 @@ async function startServer() {
 
   startFlowServer({
     flows: [
+      architectFlow,
       searchAndAnswerFlow,
-      creativeTextFlow,
-      architectFlow, // Expose the new flow
-      creatorFlow,   // Expose the new flow
-      editorFlow     // Expose the new flow
+      creatorFlow,
+      editorFlow
     ],
     port: parseInt(process.env.PORT || '3400'),
   });
