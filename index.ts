@@ -1,5 +1,5 @@
 // index.ts
-// v3.4 - UPGRADED: EditorFlow is now an intelligent agent using a Firestore prompt.
+// v3.5 - REFACTORED: Researcher (searchAndAnswerFlow) now uses a Firestore prompt.
 
 import { genkit, z } from 'genkit';
 import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai';
@@ -101,6 +101,7 @@ async function startServer() {
     }
   );
 
+  // REFACTORED: This flow now uses a managed prompt from Firestore.
   const searchAndAnswerFlow = genkitApp.defineFlow(
     {
       name: 'searchAndAnswerFlow',
@@ -108,9 +109,16 @@ async function startServer() {
       outputSchema: z.string(),
     },
     async (question) => {
+      console.log(`SearchAndAnswerFlow received query: ${question}`);
+      
+      const researcherSystemPrompt = await getGenkitPromptFromFirestore('researcher');
+
       const response = await genkitApp.generate({
         model: gemini15Pro,
-        prompt: `Answer the following question using web search results: ${question}`,
+        messages: [
+            { role: 'system', content: [{ text: researcherSystemPrompt }] },
+            { role: 'user', content: [{ text: question }] }
+        ],
         config: {
           googleSearchRetrieval: {},
           maxOutputTokens: 1000,
@@ -149,12 +157,11 @@ async function startServer() {
     }
   );
 
-  // UPGRADED: This flow is now intelligent.
   const editorFlow = genkitApp.defineFlow(
     {
       name: 'editorFlow',
-      inputSchema: z.string(), // Takes the draft
-      outputSchema: z.string(), // Returns the final polished report
+      inputSchema: z.string(),
+      outputSchema: z.string(),
     },
     async (draft) => {
       console.log(`EditorFlow received draft.`);
@@ -168,7 +175,7 @@ async function startServer() {
             { role: 'user', content: [{ text: draft }] }
         ],
         config: {
-            temperature: 0.2, // Low temperature for precise, non-creative editing
+            temperature: 0.2,
         }
       });
 
