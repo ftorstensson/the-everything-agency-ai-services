@@ -1,5 +1,5 @@
 // index.ts
-// v3.3 - UPGRADED: CreatorFlow is now an intelligent agent using a Firestore prompt.
+// v3.4 - UPGRADED: EditorFlow is now an intelligent agent using a Firestore prompt.
 
 import { genkit, z } from 'genkit';
 import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai';
@@ -120,12 +120,11 @@ async function startServer() {
     }
   );
   
-  // UPGRADED: This flow is now intelligent.
   const creatorFlow = genkitApp.defineFlow(
     {
       name: 'creatorFlow',
-      inputSchema: z.string(), // Takes the plan and research data as a single string
-      outputSchema: z.string(), // Returns the draft as a single string
+      inputSchema: z.string(),
+      outputSchema: z.string(),
     },
     async (planAndResearch) => {
       console.log(`CreatorFlow received combined input.`);
@@ -139,7 +138,7 @@ async function startServer() {
           { role: 'user', content: [{ text: planAndResearch }] }
         ],
         config: {
-          temperature: 0.5, // Slightly more creative than the architect
+          temperature: 0.5,
         }
       });
       
@@ -150,15 +149,33 @@ async function startServer() {
     }
   );
 
+  // UPGRADED: This flow is now intelligent.
   const editorFlow = genkitApp.defineFlow(
     {
       name: 'editorFlow',
-      inputSchema: z.string(),
-      outputSchema: z.string(),
+      inputSchema: z.string(), // Takes the draft
+      outputSchema: z.string(), // Returns the final polished report
     },
     async (draft) => {
-      console.log(`EditorFlow received draft: ${draft}`);
-      return "This is the final, edited, and polished report, ready for the user.";
+      console.log(`EditorFlow received draft.`);
+      
+      const editorSystemPrompt = await getGenkitPromptFromFirestore('editor');
+
+      const response = await genkitApp.generate({
+        model: gemini15Pro,
+        messages: [
+            { role: 'system', content: [{ text: editorSystemPrompt }] },
+            { role: 'user', content: [{ text: draft }] }
+        ],
+        config: {
+            temperature: 0.2, // Low temperature for precise, non-creative editing
+        }
+      });
+
+      const finalReport = response.text;
+      console.log(`EditorFlow successfully polished the report.`);
+
+      return finalReport;
     }
   );
 
