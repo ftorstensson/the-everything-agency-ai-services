@@ -1,7 +1,8 @@
 // index.ts
-// v2.3 - DEFINITIVE FIX 3: Corrected 'messages' content to be a valid Part array.
+// v3.1 - DEFINITIVE FINAL FIX: Corrected response.text() to response.text.
 
 import { genkit, z } from 'genkit';
+// REMOVED: defineTool is no longer needed.
 import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai';
 import { startFlowServer } from '@genkit-ai/express';
 import { openAI, gpt4o } from 'genkitx-openai';
@@ -12,7 +13,7 @@ import { Firestore } from '@google-cloud/firestore';
 const secretManager = new SecretManagerServiceClient();
 const db = new Firestore();
 
-// --- Helper Functions ---
+// --- Helper Functions (unchanged) ---
 
 async function getOpenAIKey(): Promise<string> {
   const secretName = 'projects/vibe-agent-final/secrets/OPENAI_API_KEY/versions/latest';
@@ -72,7 +73,7 @@ async function startServer() {
       
       const architectSystemPrompt = await getGenkitPromptFromFirestore('architect');
 
-      // DEFINITIVE FIX: The 'content' field must be an array of Parts, like [{ text: "..." }].
+      // DEFINITIVE FIX: Using the simple, robust prompt engineering approach.
       const response = await genkitApp.generate({
         model: gemini15Pro,
         messages: [
@@ -80,26 +81,22 @@ async function startServer() {
             { role: 'user', content: [{ text: taskDescription }] }
         ],
         config: {
-            tools: [{
-                type: 'output',
-                name: 'Plan',
-                schema: z.object({
-                    title: z.string(),
-                    steps: z.array(z.string())
-                })
-            }]
+            temperature: 0.0, // Set to 0 for maximum consistency in JSON output
         }
       });
       
-      const planObject = response.output?.json;
-      if (!planObject) {
-          throw new Error("Architect failed to generate a valid plan in JSON format.");
-      }
-      
-      const planJsonString = JSON.stringify(planObject);
-      console.log(`ArchitectFlow generated plan: ${planJsonString}`);
+      // DEFINITIVE FIX: response.text is a property, not a method.
+      const planJsonString = response.text;
+      console.log(`ArchitectFlow generated raw response: ${planJsonString}`);
 
-      return planJsonString;
+      // Add a validation step to ensure the output is valid JSON
+      try {
+        JSON.parse(planJsonString);
+        return planJsonString;
+      } catch (e) {
+        console.error("Architect agent returned invalid JSON.", e);
+        throw new Error("The Architect agent failed to generate a valid JSON plan. Please try again.");
+      }
     }
   );
 
@@ -118,7 +115,7 @@ async function startServer() {
           maxOutputTokens: 1000,
         },
       });
-      return response.text;
+      return response.text; // This was already correct
     }
   );
   
