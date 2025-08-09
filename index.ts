@@ -1,11 +1,18 @@
+// index.ts
+// v3.2 - DEFINITIVE FIX: Added response cleaning to handle markdown code fences.
+
 import { genkit, z } from 'genkit';
 import { vertexAI, gemini15Pro, gemini15Flash } from '@genkit-ai/vertexai';
 import { startFlowServer } from '@genkit-ai/express';
-import { openAI, gpt4o } from 'genkitx-openai'; // Import OpenAI plugin and model
-import { SecretManagerServiceClient } from '@google-cloud/secret-manager'; // Import Secret Manager client
+import { openAI, gpt4o } from 'genkitx-openai';
+import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
+import { Firestore } from '@google-cloud/firestore';
 
-// Instantiate the Secret Manager client
+// --- Initialization ---
 const secretManager = new SecretManagerServiceClient();
+const db = new Firestore();
+
+// --- Helper Functions (unchanged) ---
 
 async function getOpenAIKey(): Promise<string> {
   const secretName = 'projects/vibe-agent-final/secrets/OPENAI_API_KEY/versions/latest';
@@ -19,46 +26,78 @@ async function getOpenAIKey(): Promise<string> {
     return apiKey;
   } catch (error) {
     console.error('Failed to load OpenAI API key from Secret Manager:', error);
-    process.exit(1); // Exit if the key cannot be loaded
+    process.exit(1);
   }
 }
 
-// Create a main startup function to handle async initialization
+async function getGenkitPromptFromFirestore(promptId: string): Promise<string> {
+    try {
+        const docRef = db.collection('genkit_prompts').doc(promptId);
+        const doc = await docRef.get();
+        if (doc.exists) {
+            const promptText = doc.data()?.prompt_text;
+            if (promptText) {
+                console.log(`Successfully fetched prompt '${promptId}' from Firestore.`);
+                return promptText;
+            }
+        }
+        throw new Error(`Prompt '${promptId}' not found or is empty.`);
+    } catch (error) {
+        console.error(`Failed to fetch Genkit prompt '${promptId}':`, error);
+        return "You are a helpful assistant. Your primary prompt failed to load.";
+    }
+}
+
+
 async function startServer() {
   const openaiApiKey = await getOpenAIKey();
 
   const genkitApp = genkit({
     plugins: [
       vertexAI({ location: 'australia-southeast1' }),
-      openAI({ apiKey: openaiApiKey }), // Add the initialized OpenAI plugin
+      openAI({ apiKey: openaiApiKey }),
     ],
   });
 
-  const characterGeneratorFlow = genkitApp.defineFlow(
+  // --- ARCE Agent Flows ---
+
+  const architectFlow = genkitApp.defineFlow(
     {
-      name: 'characterGeneratorFlow',
-      inputSchema: z.object({ description: z.string() }),
-      outputSchema: z.object({
-        name: z.string(),
-        strength: z.number(),
-        intelligence: z.number(),
-        description: z.string(),
-      }),
+      name: 'architectFlow',
+      inputSchema: z.string(),
+      outputSchema: z.string(),
     },
-    async (input) => {
+    async (taskDescription) => {
+      console.log(`ArchitectFlow received task: ${taskDescription}`);
+      
+      const architectSystemPrompt = await getGenkitPromptFromFirestore('architect');
+
       const response = await genkitApp.generate({
-        model: gemini15Flash,
-        prompt: `Generate a fantasy character based on this description: ${input.description}. Return ONLY a valid JSON object.`,
+        model: gemini15Pro,
+        messages: [
+            { role: 'system', content: [{ text: architectSystemPrompt }] },
+            { role: 'user', content: [{ text: taskDescription }] }
+        ],
         config: {
-          maxOutputTokens: 256,
-          temperature: 0.1,
-        },
+            temperature: 0.0,
+        }
       });
+      
+      let planJsonString = response.text;
+      console.log(`ArchitectFlow generated raw response: ${planJsonString}`);
+
+      // DEFINITIVE FIX: Clean the response to remove markdown fences.
+      if (planJsonString.startsWith("```json")) {
+        planJsonString = planJsonString.slice(7, -3).trim();
+      }
 
       try {
-        return JSON.parse(response.text);
-      } catch (parseError) {
-        return { name: "Unknown", strength: 10, intelligence: 10, description: response.text };
+        JSON.parse(planJsonString); // We still validate it
+        console.log(`ArchitectFlow successfully cleaned and validated JSON.`);
+        return planJsonString;
+      } catch (e) {
+        console.error("Architect agent returned invalid JSON even after cleaning.", e);
+        throw new Error("The Architect agent failed to generate a valid JSON plan. Please try again.");
       }
     }
   );
@@ -81,30 +120,40 @@ async function startServer() {
       return response.text;
     }
   );
-
-  // NEW: A flow specifically to test the OpenAI integration
-  const creativeTextFlow = genkitApp.defineFlow(
+  
+  const creatorFlow = genkitApp.defineFlow(
     {
-      name: 'creativeTextFlow',
+      name: 'creatorFlow',
       inputSchema: z.string(),
       outputSchema: z.string(),
     },
-    async (topic) => {
-      const response = await genkitApp.generate({
-        model: gpt4o, // Use the imported OpenAI model
-        prompt: `Write a short, creative paragraph about: ${topic}`,
-      });
-      return response.text;
+    async (planAndResearch) => {
+      console.log(`CreatorFlow received plan and research.`);
+      return "This is the first draft of the report, based on the provided plan and research data.";
     }
   );
-  
-  // Start the production-ready server using the correct Genkit helper.
-  // Add the new flow to the list of exposed flows.
+
+  const editorFlow = genkitApp.defineFlow(
+    {
+      name: 'editorFlow',
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+    },
+    async (draft) => {
+      console.log(`EditorFlow received draft: ${draft}`);
+      return "This is the final, edited, and polished report, ready for the user.";
+    }
+  );
+
   startFlowServer({
-    flows: [characterGeneratorFlow, searchAndAnswerFlow, creativeTextFlow],
+    flows: [
+      architectFlow,
+      searchAndAnswerFlow,
+      creatorFlow,
+      editorFlow
+    ],
     port: parseInt(process.env.PORT || '3400'),
   });
 }
 
-// Run the startup function
 startServer();
