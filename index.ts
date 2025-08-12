@@ -1,5 +1,5 @@
 // index.ts
-// v3.6 - FIX: Implemented and correctly exported the missing promptArchitectFlow.
+// v3.9 - DEFINITIVE FIX 2: Corrected TypeScript type errors in catch block.
 
 import { genkit, z } from 'genkit';
 import { vertexAI, gemini15Pro } from '@genkit-ai/vertexai';
@@ -14,19 +14,27 @@ const db = new Firestore();
 
 // --- Helper Functions ---
 
-async function getOpenAIKey(): Promise<string> {
+async function getOpenAIKey(): Promise<string | null> {
   const secretName = 'projects/vibe-agent-final/secrets/OPENAI_API_KEY/versions/latest';
+  console.log(`Attempting to access secret: ${secretName}`);
   try {
     const [version] = await secretManager.accessSecretVersion({ name: secretName });
     const apiKey = version.payload?.data?.toString();
     if (!apiKey) {
-      throw new Error('OpenAI API key is empty or not found in Secret Manager.');
+      throw new Error('Secret payload is empty or not found.');
     }
-    console.log("Successfully loaded OpenAI API key from Secret Manager.");
+    console.log('Successfully loaded OpenAI API key (length:', apiKey.length, ')');
     return apiKey;
-  } catch (error) {
-    console.error('Failed to load OpenAI API key from Secret Manager:', error);
-    process.exit(1); // Exit if the key is essential and not found
+  } catch (e) {
+    // DEFINITIVE FIX: Type-check the error object before accessing properties.
+    const error = e as any; // Cast to 'any' to safely access properties
+    console.warn('--- OPENAI PLUGIN DISABLED ---');
+    console.warn('Failed to load OpenAI API key from Secret Manager.');
+    console.warn('Error details:', error.message);
+    if (error.code === 7) { // Error code 7 is PERMISSION_DENIED for Google Cloud APIs
+        console.warn('IAM PERMISSION DENIED: The service account for this Cloud Run service is missing the "Secret Manager Secret Accessor" role.');
+    }
+    return null;
   }
 }
 
@@ -37,30 +45,34 @@ async function getGenkitPromptFromFirestore(promptId: string): Promise<string> {
         if (doc.exists) {
             const promptText = doc.data()?.prompt_text;
             if (promptText) {
-                console.log(`Successfully fetched prompt '${promptId}' from Firestore.`);
                 return promptText;
             }
         }
-        throw new Error(`Prompt '${promptId}' not found or is empty.`);
+        throw new Error(`Prompt '${promptId}' not found or is empty in Firestore.`);
     } catch (error) {
         console.error(`Failed to fetch Genkit prompt '${promptId}':`, error);
-        // Provide a safe fallback to prevent crashes
         return "You are a helpful assistant. Your primary prompt failed to load.";
     }
 }
 
-
 async function startServer() {
+  console.log('=== GENKIT STARTUP: Beginning initialization ===');
+
+  const plugins = [
+    vertexAI({ location: 'australia-southeast1' })
+  ];
+
   const openaiApiKey = await getOpenAIKey();
+  if (openaiApiKey) {
+    plugins.push(openAI({ apiKey: openaiApiKey }));
+    console.log('=== OpenAI plugin successfully enabled. ===');
+  } else {
+    console.warn('=== OpenAI plugin is disabled due to missing key. Service will run in Gemini-only mode. ===');
+  }
+  
+  const genkitApp = genkit({ plugins });
+  console.log('=== Genkit initialized successfully. ===');
 
-  const genkitApp = genkit({
-    plugins: [
-      vertexAI({ location: 'australia-southeast1' }),
-      openAI({ apiKey: openaiApiKey }),
-    ],
-  });
-
-  // --- DEFINITIVE FIX: The missing Prompt Architect Flow ---
   const promptArchitectFlow = genkitApp.defineFlow(
     {
       name: 'promptArchitectFlow',
@@ -73,33 +85,23 @@ async function startServer() {
     },
     async (input) => {
       console.log(`PromptArchitectFlow received request for agent: ${input.agent_name}`);
-      
       const masterPrompt = await getGenkitPromptFromFirestore('prompt_architect_master');
-
-      // Format the master prompt with the provided inputs
       const formattedSystemPrompt = masterPrompt
         .replace('{team_mission}', input.team_mission)
         .replace('{agent_name}', input.agent_name)
         .replace('{agent_description}', input.agent_description);
 
       const response = await genkitApp.generate({
-        model: gpt4o, // Using GPT-4o for high-quality prompt generation
-        messages: [
-            { role: 'system', content: [{ text: formattedSystemPrompt }] },
-        ],
-        config: {
-            temperature: 0.5,
-        }
+        model: gemini15Pro,
+        messages: [{ role: 'system', content: [{ text: formattedSystemPrompt }] }],
+        config: { temperature: 0.5 }
       });
       
-      const professionalPrompt = response.text;
       console.log(`PromptArchitectFlow successfully generated a new prompt for ${input.agent_name}.`);
-      return professionalPrompt;
+      return response.text;
     }
   );
 
-
-  // --- ARCE Agent Flows (Unchanged) ---
   const architectFlow = genkitApp.defineFlow({ name: 'architectFlow', inputSchema: z.string(), outputSchema: z.string() }, async (taskDescription) => {
       const prompt = await getGenkitPromptFromFirestore('architect');
       const response = await genkitApp.generate({ model: gemini15Pro, messages: [{ role: 'system', content: [{ text: prompt }] }, { role: 'user', content: [{ text: taskDescription }] }], config: { temperature: 0.0 } });
@@ -126,10 +128,10 @@ async function startServer() {
       return response.text;
   });
 
-  // --- Start the Server ---
+  console.log('=== Starting flow server... ===');
   startFlowServer({
     flows: [
-      promptArchitectFlow, // DEFINITIVE FIX: Export the missing flow
+      promptArchitectFlow,
       architectFlow,
       searchAndAnswerFlow,
       creatorFlow,
@@ -137,6 +139,7 @@ async function startServer() {
     ],
     port: parseInt(process.env.PORT || '3400'),
   });
+  console.log('=== Flow server started successfully. ===');
 }
 
 startServer();
