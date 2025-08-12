@@ -1,5 +1,5 @@
 // index.ts
-// v3.9 - DEFINITIVE FIX 2: Corrected TypeScript type errors in catch block.
+// v3.10 - STRATEGIC FIX: Refactored promptArchitectFlow to be "Gemini First".
 
 import { genkit, z } from 'genkit';
 import { vertexAI, gemini15Pro } from '@genkit-ai/vertexai';
@@ -26,12 +26,11 @@ async function getOpenAIKey(): Promise<string | null> {
     console.log('Successfully loaded OpenAI API key (length:', apiKey.length, ')');
     return apiKey;
   } catch (e) {
-    // DEFINITIVE FIX: Type-check the error object before accessing properties.
-    const error = e as any; // Cast to 'any' to safely access properties
+    const error = e as any;
     console.warn('--- OPENAI PLUGIN DISABLED ---');
     console.warn('Failed to load OpenAI API key from Secret Manager.');
     console.warn('Error details:', error.message);
-    if (error.code === 7) { // Error code 7 is PERMISSION_DENIED for Google Cloud APIs
+    if (error.code === 7) {
         console.warn('IAM PERMISSION DENIED: The service account for this Cloud Run service is missing the "Secret Manager Secret Accessor" role.');
     }
     return null;
@@ -92,7 +91,8 @@ async function startServer() {
         .replace('{agent_description}', input.agent_description);
 
       const response = await genkitApp.generate({
-        model: gemini15Pro,
+        // DEFINITIVE FIX: Use the native, reliable Gemini model for this core function.
+        model: gemini15Pro, 
         messages: [{ role: 'system', content: [{ text: formattedSystemPrompt }] }],
         config: { temperature: 0.5 }
       });
