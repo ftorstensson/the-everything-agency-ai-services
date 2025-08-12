@@ -1,0 +1,36 @@
+steps:
+  # Step 1: Build the container image using our Dockerfile.
+  # We tag the image with the commit SHA to ensure we have a unique,
+  # verifiable version for every single build.
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'australia-southeast1-docker.pkg.dev/vibe-agent-final/cloud-run-source-deploy/the-everything-agency-ai-services/ai-services-v4:${COMMIT_SHA}'
+      - '.'
+
+  # Step 2: Push the container image to Google Artifact Registry.
+  # This stores our finished, verified container in a secure, private registry.
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'australia-southeast1-docker.pkg.dev/vibe-agent-final/cloud-run-source-deploy/the-everything-agency-ai-services/ai-services-v4:${COMMIT_SHA}'
+
+  # Step 3: Deploy the exact image to Cloud Run.
+  # This command tells Cloud Run to IGNORE the source code and instead
+  # pull and run the specific container image we just built and pushed.
+  # This eliminates any possibility of a buildpack misconfiguration.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ai-services-v4' # Our new, clean service name
+      - '--image'
+      - 'australia-southeast1-docker.pkg.dev/vibe-agent-final/cloud-run-source-deploy/the-everything-agency-ai-services/ai-services-v4:${COMMIT_SHA}'
+      - '--region'
+      - 'australia-southeast1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--quiet'
