@@ -1,0 +1,34 @@
+steps:
+  # Step 1: Install dependencies cleanly
+  # This uses the official Node.js build image from Google.
+  # It runs 'npm ci' which is the recommended command for CI/CD environments
+  # as it ensures a clean, deterministic install from package-lock.json.
+  - name: 'gcr.io/cloud-builders/npm'
+    args: ['ci']
+
+  # Step 2: Build the application
+  # This runs the 'npm run build' command which we have already
+  # proven to be successful in the workspace terminal. It will compile
+  # our TypeScript into JavaScript in the 'dist' directory.
+  - name: 'gcr.io/cloud-builders/npm'
+    args: ['run', 'build']
+
+  # Step 3: Deploy to Cloud Run
+  # This uses the official gcloud build image to deploy the service.
+  # It deploys the contents of the current directory (source code + the newly created 'dist' folder).
+  # It specifies the service name, region, and points to the compiled code
+  # by using the standard Node.js entry point 'dist/index.js'.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ai-services-v3' # The name of our Cloud Run service
+      - '--source'
+      - '.' # Deploy from the current directory
+      - '--region'
+      - 'australia-southeast1' # The region of our service
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--quiet'
